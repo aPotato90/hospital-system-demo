@@ -2,6 +2,7 @@ import { addDays, addMinutes, differenceInYears, startOfDay } from "date-fns";
 import type { AppointmentData } from "./appointment";
 import type { ClinicalDepartment, WithId } from "./common";
 import type { ConsultationData } from "./consultation";
+import { CONSULTATION_FEES_KOBO } from "./fees";
 import {
   sumLinesKobo,
   sumPaymentsKobo,
@@ -51,12 +52,7 @@ export const SEED_COUNTS = {
   appointments: 60,
 } as const;
 
-/** Consultation fee per clinical department, in kobo. */
-export const CONSULTATION_FEES_KOBO: Record<ClinicalDepartment, number> = {
-  "General Practice": 1_000_000,
-  Paediatrics: 800_000,
-  Obstetrics: 1_200_000,
-};
+export { CONSULTATION_FEES_KOBO };
 
 // Small, fast, deterministic PRNG (mulberry32).
 function createRandom(seed: number) {
