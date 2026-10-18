@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   isoDateSchema,
   LIMITS,
+  localIsoDate,
   nameSchema,
   phoneSchema,
   shortTextSchema,
@@ -20,8 +21,9 @@ export const patientNoSchema = z
 export const patientFormSchema = z.object({
   firstName: nameSchema,
   lastName: nameSchema,
+  // Compared with today's local date, read at validation time.
   dateOfBirth: isoDateSchema.refine(
-    (value) => value <= new Date().toISOString().slice(0, 10),
+    (value) => value <= localIsoDate(),
     "Date of birth cannot be in the future",
   ),
   sex: sexSchema,

@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { addDays, isPast, startOfDay } from "date-fns";
+import { addDays, startOfDay } from "date-fns";
 import { getDocs, query, where } from "firebase/firestore";
 import { Loader2Icon } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -39,12 +39,15 @@ import {
   CLINIC_CLOSE_HOUR,
   CLINIC_OPEN_HOUR,
   combineDateTime,
+  MIN_BOOKING_LEAD_MINUTES,
   type BookAppointmentFormValues,
 } from "@/lib/hms/appointment";
 import { CLINICAL_DEPARTMENTS, LIMITS } from "@/lib/hms/common";
 import { useCollection } from "@/lib/hms/hooks";
 import { collectionRef } from "@/lib/hms/repo";
 import { useSandbox } from "@/lib/hms/sandbox-context";
+
+const CLASH = "clash";
 
 type Props = {
   open: boolean;
@@ -101,10 +104,21 @@ function BookingForm({
       time: "09:00",
       reason: "",
     },
+    // Validate a field once it has been left (or on submit), then on every
+    // change. Date and time list each other as `deps`, so editing either one
+    // re-checks the combined "in the future" rule on both.
     mode: "onTouched",
+    reValidateMode: "onChange",
   });
-  const { control, register, handleSubmit, formState, setValue, setError } =
-    form;
+  const {
+    control,
+    register,
+    handleSubmit,
+    formState,
+    setValue,
+    setError,
+    clearErrors,
+  } = form;
   const errors = formState.errors;
   const department = useWatch({ control, name: "department" });
 
@@ -125,12 +139,15 @@ function BookingForm({
     [staff.data, department],
   );
 
+  // The double-booking check needs the database, so it runs on submit and is
+  // set by hand; drop it as soon as the doctor, date or time changes.
+  const clearClash = () => {
+    if (formState.errors.time?.type === CLASH) clearErrors("time");
+  };
+
+  // The schema (with a fresh "now") has already accepted date and time here.
   async function onSubmit(values: BookAppointmentFormValues) {
     const when = combineDateTime(values.date, values.time);
-    if (isPast(when)) {
-      setError("time", { message: "Choose a time in the future" });
-      return;
-    }
     setSubmitting(true);
     try {
       // The same doctor cannot be booked twice at the same time.
@@ -152,6 +169,7 @@ function BookingForm({
         );
       if (clash) {
         setError("time", {
+          type: CLASH,
           message: "This doctor already has an appointment at that time",
         });
         setSubmitting(false);
@@ -227,6 +245,7 @@ function BookingForm({
                   onValueChange={(v) => {
                     field.onChange(v);
                     setValue("doctorId", "");
+                    clearClash();
                   }}
                 >
                   <SelectTrigger id="book-department" className="w-full">
@@ -249,7 +268,13 @@ function BookingForm({
               control={control}
               name="doctorId"
               render={({ field }) => (
-                <Select value={field.value} onValueChange={field.onChange}>
+                <Select
+                  value={field.value}
+                  onValueChange={(v) => {
+                    field.onChange(v);
+                    clearClash();
+                  }}
+                >
                   <SelectTrigger
                     id="book-doctor"
                     className="w-full"
@@ -272,31 +297,42 @@ function BookingForm({
           </Field>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field data-invalid={!!errors.date}>
-            <FieldLabel htmlFor="book-date">Date</FieldLabel>
-            <Input
-              id="book-date"
-              type="date"
-              min={todayIso}
-              aria-invalid={!!errors.date}
-              {...register("date")}
-            />
-            <FieldError errors={[errors.date]} />
-          </Field>
-          <Field data-invalid={!!errors.time}>
-            <FieldLabel htmlFor="book-time">Time</FieldLabel>
-            <Input
-              id="book-time"
-              type="time"
-              step={900}
-              min={`${String(CLINIC_OPEN_HOUR).padStart(2, "0")}:00`}
-              max={`${CLINIC_CLOSE_HOUR}:00`}
-              aria-invalid={!!errors.time}
-              {...register("time")}
-            />
-            <FieldError errors={[errors.time]} />
-          </Field>
+        <div className="grid gap-2">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field data-invalid={!!errors.date}>
+              <FieldLabel htmlFor="book-date">Date</FieldLabel>
+              <Input
+                id="book-date"
+                type="date"
+                min={todayIso}
+                aria-invalid={!!errors.date}
+                aria-describedby="book-when-hint book-when-error"
+                {...register("date", { deps: ["time"], onChange: clearClash })}
+              />
+            </Field>
+            <Field data-invalid={!!errors.time}>
+              <FieldLabel htmlFor="book-time">Time</FieldLabel>
+              <Input
+                id="book-time"
+                type="time"
+                step={900}
+                min={`${String(CLINIC_OPEN_HOUR).padStart(2, "0")}:00`}
+                max={`${CLINIC_CLOSE_HOUR}:00`}
+                aria-invalid={!!errors.time}
+                aria-describedby="book-when-hint book-when-error"
+                {...register("time", { deps: ["date"], onChange: clearClash })}
+              />
+            </Field>
+          </div>
+          <FieldDescription id="book-when-hint">
+            Your local time, at least {MIN_BOOKING_LEAD_MINUTES} minutes from
+            now.
+          </FieldDescription>
+          {/* One message for the pair; identical messages are shown once. */}
+          <FieldError
+            id="book-when-error"
+            errors={[errors.date, errors.time]}
+          />
         </div>
 
         <Field data-invalid={!!errors.reason}>
