@@ -1,0 +1,10 @@
+.next
+.next-e2e
+node_modules
+coverage
+playwright-report
+test-results
+package-lock.json
+next-env.d.ts
+*-debug.log
+docs/screenshots

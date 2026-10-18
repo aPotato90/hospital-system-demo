@@ -1,0 +1,622 @@
+rules_version = '2';
+
+// Demo Hospital Manager: Firestore security rules.
+//
+// Every visitor signs in anonymously and works in a private sandbox under
+// users/{uid}/... Nothing else in the database is readable or writable.
+//
+// The limits and status tables below mirror src/lib/hms/common.ts and
+// src/lib/hms/transitions.ts. Change both together: the unit tests compare the
+// limits and tables, and the rules tests (npm run test:rules) exercise every
+// status transition.
+//
+// Evaluation budget. Firestore stops evaluating a request after 1000
+// expressions, and rules have no loops, so arrays are capped and each element
+// is checked by index. Measured against the emulator, a function call costs
+// about as much as several comparisons, so:
+//   - strings are checked with one regex each (it also rejects non-strings),
+//   - array elements are checked inline, and `size() == k` plus reading every
+//     required field proves the exact key set without keys().hasOnly(),
+//   - updates skip arrays that are unchanged (one list comparison),
+//   - invoices take payments one at a time (see Invoices below).
+// The rules tests include worst-case documents (maximum lines, payments,
+// prescriptions and lab requests, all at maximum length) to prove they fit.
+//
+// These rules are pasted into the Firebase console by hand; this repo never
+// deploys them.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------------------------------------------------------------------
+    // Numeric limits (keep in sync with LIMITS in src/lib/hms/common.ts).
+    // String length limits live in the regexes below.
+    // ---------------------------------------------------------------------
+
+    function maxText() { return 2000; }
+    function maxKobo() { return 100000000000; }
+    function maxQuantity() { return 100000; }
+    function maxInvoiceLines() { return 10; }
+    function maxPayments() { return 20; }
+    function maxPrescriptions() { return 10; }
+    function maxLabRequests() { return 10; }
+
+    // ---------------------------------------------------------------------
+    // Generic field checks
+    // ---------------------------------------------------------------------
+
+    // The signed-in user owns the sandbox at users/{uid}.
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    // The document has exactly these fields: nothing missing, nothing extra.
+    function hasExactly(d, fields) {
+      return d.keys().hasAll(fields) && d.keys().hasOnly(fields);
+    }
+
+    // A reference to another document in the sandbox (1-128 chars, no "/").
+    function isId(v) {
+      return v.matches('^[^/]{1,128}$');
+    }
+
+    // A required single-line name (people, items, tests): 1-120 chars.
+    function isName(v) {
+      return v.matches('^.{1,120}$');
+    }
+
+    // A required single-line label (categories, units): 1-60 chars.
+    function isLabel(v) {
+      return v.matches('^.{1,60}$');
+    }
+
+    // Short free text that may be empty: 0-300 chars, line breaks allowed.
+    function isShortText(v) {
+      return v.matches('(?s)^.{0,300}$');
+    }
+
+    // Short free text that must not be empty: 1-300 chars.
+    function isRequiredShortText(v) {
+      return v.matches('(?s)^.{1,300}$');
+    }
+
+    // A postal address: 1-200 chars.
+    function isAddress(v) {
+      return v.matches('(?s)^.{1,200}$');
+    }
+
+    // Long free text such as notes and results: up to maxText() chars.
+    function isLongText(v) {
+      return v is string && v.size() <= maxText();
+    }
+
+    // Loose phone shape: 7-20 chars of digits, spaces, -, brackets, with an
+    // optional leading +.
+    function isPhone(v) {
+      return v.matches('^([+][0-9 ()-]{6,19}|[0-9 ()-]{7,20})$');
+    }
+
+    // Money is always integer kobo.
+    function isKobo(v) {
+      return v is int && v >= 0 && v <= maxKobo();
+    }
+
+    // Whole-number quantities.
+    function isQuantity(v) {
+      return v is int && v >= 0 && v <= maxQuantity();
+    }
+
+    // A calendar date stored as YYYY-MM-DD.
+    function isIsoDate(v) {
+      return v.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
+    }
+
+    function isRole(v) {
+      return v in ['receptionist', 'doctor', 'lab', 'pharmacist', 'cashier', 'admin'];
+    }
+
+    function isDepartment(v) {
+      return v in ['General Practice', 'Paediatrics', 'Obstetrics', 'Laboratory', 'Pharmacy'];
+    }
+
+    // Departments that take appointments.
+    function isClinicalDepartment(v) {
+      return v in ['General Practice', 'Paediatrics', 'Obstetrics'];
+    }
+
+    // ---------------------------------------------------------------------
+    // Status transition tables (keep in sync with src/lib/hms/transitions.ts)
+    // Staying in the same status is handled by each update rule.
+    // ---------------------------------------------------------------------
+
+    function appointmentTransitions() {
+      return {
+        'scheduled': ['checked-in', 'cancelled', 'no-show'],
+        'checked-in': ['in-consultation', 'cancelled'],
+        'in-consultation': ['completed'],
+        'completed': [],
+        'cancelled': [],
+        'no-show': []
+      };
+    }
+
+    function labOrderTransitions() {
+      return {
+        'requested': ['collected'],
+        'collected': ['resulted'],
+        'resulted': []
+      };
+    }
+
+    function prescriptionTransitions() {
+      return {
+        'pending': ['dispensed'],
+        'dispensed': []
+      };
+    }
+
+    function invoiceTransitions() {
+      return {
+        'unpaid': ['part-paid', 'paid'],
+        'part-paid': ['paid'],
+        'paid': []
+      };
+    }
+
+    // ---------------------------------------------------------------------
+    // Patients: users/{uid}/patients/{patientId}
+    // ---------------------------------------------------------------------
+
+    function isNextOfKin(v) {
+      return v.size() == 2 && isName(v.name) && isPhone(v.phone);
+    }
+
+    function isValidPatient(d) {
+      return hasExactly(d, ['patientNo', 'firstName', 'lastName', 'dateOfBirth',
+          'sex', 'phone', 'address', 'nextOfKin', 'allergies', 'registeredAt'])
+        && d.patientNo.matches('^RDH-[0-9]{6}$')
+        && isName(d.firstName)
+        && isName(d.lastName)
+        && isIsoDate(d.dateOfBirth)
+        && d.sex in ['female', 'male']
+        && isPhone(d.phone)
+        && isAddress(d.address)
+        && isNextOfKin(d.nextOfKin)
+        && isShortText(d.allergies)
+        && d.registeredAt is timestamp;
+    }
+
+    // ---------------------------------------------------------------------
+    // Staff: users/{uid}/staff/{staffId}
+    // ---------------------------------------------------------------------
+
+    function isValidStaff(d) {
+      return hasExactly(d, ['name', 'role', 'department', 'email'])
+        && isName(d.name)
+        && isRole(d.role)
+        && isDepartment(d.department)
+        // Demo contacts are always example.com addresses.
+        && d.email.matches('^[a-z0-9.+-]{1,108}@example[.]com$');
+    }
+
+    // ---------------------------------------------------------------------
+    // Appointments: users/{uid}/appointments/{appointmentId}
+    // ---------------------------------------------------------------------
+
+    function isValidAppointment(d) {
+      return hasExactly(d, ['patientId', 'doctorId', 'department', 'scheduledAt',
+          'status', 'reason'])
+        && isId(d.patientId)
+        && isId(d.doctorId)
+        && isClinicalDepartment(d.department)
+        && d.scheduledAt is timestamp
+        && d.status in appointmentTransitions()
+        && isRequiredShortText(d.reason);
+    }
+
+    // A status change touches only `status` and follows the table. Details
+    // (time, doctor, reason) can be edited only while still scheduled.
+    function isValidAppointmentUpdate(before, after) {
+      return after.patientId == before.patientId
+        && (after.status == before.status
+          ? before.status == 'scheduled' || after.diff(before).affectedKeys().size() == 0
+          : after.status in appointmentTransitions()[before.status]
+            && after.diff(before).affectedKeys().hasOnly(['status']));
+    }
+
+    // ---------------------------------------------------------------------
+    // Consultations: users/{uid}/consultations/{consultationId}
+    // ---------------------------------------------------------------------
+
+    // One prescribed item: stockItemId, name, dose text, quantity >= 1.
+    function isConsultationPrescription(p) {
+      return p.size() == 4
+        && p.stockItemId.matches('^[^/]{1,128}$')
+        && p.name.matches('^.{1,120}$')
+        && p.dose.matches('(?s)^.{1,300}$')
+        && p.quantity is int && p.quantity >= 1 && p.quantity <= 100000;
+    }
+
+    // Up to maxPrescriptions() entries, each checked by index (n = size).
+    function isConsultationPrescriptionsOfSize(v, n) {
+      return n <= maxPrescriptions()
+        && (n <= 0 || isConsultationPrescription(v[0]))
+        && (n <= 1 || isConsultationPrescription(v[1]))
+        && (n <= 2 || isConsultationPrescription(v[2]))
+        && (n <= 3 || isConsultationPrescription(v[3]))
+        && (n <= 4 || isConsultationPrescription(v[4]))
+        && (n <= 5 || isConsultationPrescription(v[5]))
+        && (n <= 6 || isConsultationPrescription(v[6]))
+        && (n <= 7 || isConsultationPrescription(v[7]))
+        && (n <= 8 || isConsultationPrescription(v[8]))
+        && (n <= 9 || isConsultationPrescription(v[9]));
+    }
+
+    function isConsultationPrescriptions(v) {
+      return v is list && isConsultationPrescriptionsOfSize(v, v.size());
+    }
+
+    // One requested lab test: testId and name.
+    function isLabRequest(p) {
+      return p.size() == 2
+        && p.testId.matches('^[^/]{1,128}$')
+        && p.name.matches('^.{1,120}$');
+    }
+
+    // Up to maxLabRequests() entries, each checked by index (n = size).
+    function isLabRequestsOfSize(v, n) {
+      return n <= maxLabRequests()
+        && (n <= 0 || isLabRequest(v[0]))
+        && (n <= 1 || isLabRequest(v[1]))
+        && (n <= 2 || isLabRequest(v[2]))
+        && (n <= 3 || isLabRequest(v[3]))
+        && (n <= 4 || isLabRequest(v[4]))
+        && (n <= 5 || isLabRequest(v[5]))
+        && (n <= 6 || isLabRequest(v[6]))
+        && (n <= 7 || isLabRequest(v[7]))
+        && (n <= 8 || isLabRequest(v[8]))
+        && (n <= 9 || isLabRequest(v[9]));
+    }
+
+    function isLabRequests(v) {
+      return v is list && isLabRequestsOfSize(v, v.size());
+    }
+
+    // Everything except the two arrays.
+    function isConsultationBase(d) {
+      return hasExactly(d, ['appointmentId', 'patientId', 'doctorId', 'notes',
+          'diagnosis', 'prescriptions', 'labRequests', 'createdAt'])
+        && isId(d.appointmentId)
+        && isId(d.patientId)
+        && isId(d.doctorId)
+        && isLongText(d.notes)
+        && isLongText(d.diagnosis)
+        && d.createdAt is timestamp;
+    }
+
+    function isValidConsultation(d) {
+      return isConsultationBase(d)
+        && isConsultationPrescriptions(d.prescriptions)
+        && isLabRequests(d.labRequests);
+    }
+
+    // Notes, diagnosis and orders can be edited; who and when cannot. An
+    // array that is unchanged (one list comparison) is not checked again.
+    function isValidConsultationUpdate(before, after) {
+      return isConsultationBase(after)
+        && after.appointmentId == before.appointmentId
+        && after.patientId == before.patientId
+        && after.doctorId == before.doctorId
+        && after.createdAt == before.createdAt
+        && (after.prescriptions == before.prescriptions
+          || isConsultationPrescriptions(after.prescriptions))
+        && (after.labRequests == before.labRequests
+          || isLabRequests(after.labRequests));
+    }
+
+    // ---------------------------------------------------------------------
+    // Lab tests catalogue: users/{uid}/labTests/{testId}
+    // ---------------------------------------------------------------------
+
+    function isValidLabTest(d) {
+      return hasExactly(d, ['name', 'category', 'priceKobo'])
+        && isName(d.name)
+        && isLabel(d.category)
+        && isKobo(d.priceKobo);
+    }
+
+    // ---------------------------------------------------------------------
+    // Lab orders: users/{uid}/labOrders/{labOrderId}
+    // ---------------------------------------------------------------------
+
+    // A result and its time exist only once the order is resulted.
+    function isValidLabOrder(d) {
+      return hasExactly(d, ['consultationId', 'patientId', 'testId', 'name',
+          'status', 'resultText', 'resultedAt', 'priceKobo'])
+        && isId(d.consultationId)
+        && isId(d.patientId)
+        && isId(d.testId)
+        && isName(d.name)
+        && d.status in labOrderTransitions()
+        && isLongText(d.resultText)
+        && isKobo(d.priceKobo)
+        && (d.status == 'resulted'
+          ? d.resultedAt is timestamp && d.resultText.size() > 0
+          : d.resultedAt == null && d.resultText == '');
+    }
+
+    // Only status, result and result time change; a resulted order is final;
+    // the result time of a new result is the server time.
+    function isValidLabOrderUpdate(before, after) {
+      return after.diff(before).affectedKeys().hasOnly(['status', 'resultText', 'resultedAt'])
+        && (after.status == before.status
+          ? before.status != 'resulted' || after.diff(before).affectedKeys().size() == 0
+          : after.status in labOrderTransitions()[before.status])
+        && (after.status != 'resulted' || before.status == 'resulted'
+          || after.resultedAt == request.time);
+    }
+
+    // ---------------------------------------------------------------------
+    // Stock items: users/{uid}/stockItems/{stockItemId}
+    // ---------------------------------------------------------------------
+
+    function isValidStockItem(d) {
+      return hasExactly(d, ['name', 'category', 'unit', 'quantity', 'reorderLevel',
+          'unitPriceKobo'])
+        && isName(d.name)
+        && isLabel(d.category)
+        && isLabel(d.unit)
+        && isQuantity(d.quantity)
+        && isQuantity(d.reorderLevel)
+        && isKobo(d.unitPriceKobo);
+    }
+
+    // ---------------------------------------------------------------------
+    // Prescriptions: users/{uid}/prescriptions/{prescriptionId}
+    // ---------------------------------------------------------------------
+
+    // A dispensed time exists only once dispensed.
+    function isValidPrescription(d) {
+      return hasExactly(d, ['consultationId', 'patientId', 'stockItemId', 'name',
+          'quantity', 'status', 'dispensedAt'])
+        && isId(d.consultationId)
+        && isId(d.patientId)
+        && isId(d.stockItemId)
+        && isName(d.name)
+        && isQuantity(d.quantity) && d.quantity >= 1
+        && d.status in prescriptionTransitions()
+        && (d.status == 'dispensed' ? d.dispensedAt is timestamp : d.dispensedAt == null);
+    }
+
+    // Only status and dispensed time change, following the table; dispensing
+    // records the server time.
+    function isValidPrescriptionUpdate(before, after) {
+      return after.diff(before).affectedKeys().hasOnly(['status', 'dispensedAt'])
+        && (after.status == before.status
+          ? after.diff(before).affectedKeys().size() == 0
+          : after.status in prescriptionTransitions()[before.status]
+            && after.dispensedAt == request.time);
+    }
+
+    // ---------------------------------------------------------------------
+    // Invoices: users/{uid}/invoices/{invoiceId}
+    //
+    // Checking every line and every payment in one request would not fit the
+    // 1000-expression budget. So:
+    //   - a new invoice carries at most one payment,
+    //   - each update appends at most one payment,
+    //   - earlier payments and unchanged lines are proven equal to the stored
+    //     ones with a single list comparison and are not re-checked.
+    // The app records payments one at a time, which matches the cashier flow.
+    //
+    // paidKobo always equals the sum of the payments: it starts as the single
+    // payment (or 0) and every append adds exactly the new amount. The line
+    // total (sum of quantity * unit price) is checked by the app's schema
+    // instead: summing 10 lines here costs about as much as four more line
+    // checks and would push a full invoice over the budget.
+    // ---------------------------------------------------------------------
+
+    // One line: description, quantity >= 1, unit price in kobo, kind.
+    function isInvoiceLine(p) {
+      return p.size() == 4
+        && p.description.matches('^.{1,120}$')
+        && p.quantity is int && p.quantity >= 1 && p.quantity <= 100000
+        && p.unitPriceKobo is int && p.unitPriceKobo >= 0
+        && p.unitPriceKobo <= 100000000000
+        && p.kind in ['consultation', 'lab', 'pharmacy'];
+    }
+
+    // 1 to maxInvoiceLines() lines, each checked by index (n = size).
+    function isInvoiceLinesOfSize(v, n) {
+      return n >= 1 && n <= maxInvoiceLines()
+        && isInvoiceLine(v[0])
+        && (n <= 1 || isInvoiceLine(v[1]))
+        && (n <= 2 || isInvoiceLine(v[2]))
+        && (n <= 3 || isInvoiceLine(v[3]))
+        && (n <= 4 || isInvoiceLine(v[4]))
+        && (n <= 5 || isInvoiceLine(v[5]))
+        && (n <= 6 || isInvoiceLine(v[6]))
+        && (n <= 7 || isInvoiceLine(v[7]))
+        && (n <= 8 || isInvoiceLine(v[8]))
+        && (n <= 9 || isInvoiceLine(v[9]));
+    }
+
+    function isInvoiceLines(v) {
+      return v is list && isInvoiceLinesOfSize(v, v.size());
+    }
+
+    // One payment: amount >= 1 kobo, method, time. Payment times are client
+    // times (server timestamps are not allowed inside arrays), so only the
+    // type is checked.
+    function isPayment(p) {
+      return p.size() == 3
+        && p.amountKobo is int && p.amountKobo >= 1 && p.amountKobo <= 100000000000
+        && p.method in ['cash', 'card', 'transfer']
+        && p.at is timestamp;
+    }
+
+    // Status is derived from the amounts (see invoiceStatusFor in TypeScript).
+    function invoiceStatusFor(total, paid) {
+      return paid >= total ? 'paid' : (paid > 0 ? 'part-paid' : 'unpaid');
+    }
+
+    // Fields, types and amounts, without the per-element checks.
+    function isInvoiceBase(d) {
+      return hasExactly(d, ['patientId', 'consultationId', 'lines', 'totalKobo',
+          'paidKobo', 'status', 'createdAt', 'payments'])
+        && isId(d.patientId)
+        && isId(d.consultationId)
+        && isKobo(d.totalKobo)
+        && isKobo(d.paidKobo)
+        && d.payments is list && d.payments.size() <= maxPayments()
+        && d.createdAt is timestamp
+        && d.paidKobo <= d.totalKobo
+        && d.status == invoiceStatusFor(d.totalKobo, d.paidKobo);
+    }
+
+    // A new invoice: every line checked, at most one payment.
+    function isValidNewInvoice(d) {
+      return isInvoiceBase(d)
+        && isInvoiceLines(d.lines)
+        && (d.payments.size() == 0
+          ? d.paidKobo == 0
+          : d.payments.size() == 1 && isPayment(d.payments[0])
+            && d.paidKobo == d.payments[0].amountKobo);
+    }
+
+    // Exactly one payment appended after the n earlier, unchanged ones.
+    function isAppendedPayment(before, after, n) {
+      return after.payments.size() == n + 1
+        && (n == 0 || after.payments[0:n] == before.payments)
+        && isPayment(after.payments[n])
+        && after.paidKobo == before.paidKobo + after.payments[n].amountKobo;
+    }
+
+    // Who and when never change, status only moves forward, lines (and the
+    // total) can be edited only while nothing has been paid, and payments are
+    // append-only.
+    function isValidInvoiceUpdate(before, after) {
+      return isInvoiceBase(after)
+        && after.patientId == before.patientId
+        && after.consultationId == before.consultationId
+        && after.createdAt == before.createdAt
+        && (after.status == before.status
+          || after.status in invoiceTransitions()[before.status])
+        && (after.lines == before.lines
+          ? after.totalKobo == before.totalKobo
+          : before.paidKobo == 0 && after.paidKobo == 0
+            && isInvoiceLines(after.lines))
+        && (after.payments == before.payments
+          ? after.paidKobo == before.paidKobo
+          : isAppendedPayment(before, after, before.payments.size()));
+    }
+
+    // ---------------------------------------------------------------------
+    // Audit log: users/{uid}/auditLog/{entryId}
+    // ---------------------------------------------------------------------
+
+    // Stamped with the server time so entries cannot be back-dated.
+    function isValidAuditEntry(d) {
+      return hasExactly(d, ['actorRole', 'action', 'entityType', 'entityId', 'at'])
+        && isRole(d.actorRole)
+        && d.action.matches('^[a-z]{1,30}([.][a-z-]{1,29})?$')
+        && d.entityType in ['patient', 'appointment', 'consultation', 'labOrder',
+          'prescription', 'invoice', 'stockItem', 'staff', 'sandbox']
+        && isId(d.entityId)
+        && d.at == request.time;
+    }
+
+    // ---------------------------------------------------------------------
+    // Sandbox state: users/{uid}/meta/state
+    // ---------------------------------------------------------------------
+
+    function isValidMetaState(d) {
+      return hasExactly(d, ['seeded', 'seededAt', 'activeRole'])
+        && d.seeded is bool
+        && (d.seededAt == null || d.seededAt is timestamp)
+        && isRole(d.activeRole);
+    }
+
+    // ---------------------------------------------------------------------
+    // Sandbox: users/{uid}/...
+    // Each collection is matched explicitly; anything else is denied.
+    // ---------------------------------------------------------------------
+
+    match /users/{uid} {
+
+      match /patients/{patientId} {
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid) && isValidPatient(request.resource.data);
+        // The patient number never changes once issued.
+        allow update: if isOwner(uid) && isValidPatient(request.resource.data)
+          && request.resource.data.patientNo == resource.data.patientNo;
+      }
+
+      match /staff/{staffId} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid) && isValidStaff(request.resource.data);
+      }
+
+      match /appointments/{appointmentId} {
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid) && isValidAppointment(request.resource.data);
+        allow update: if isOwner(uid) && isValidAppointment(request.resource.data)
+          && isValidAppointmentUpdate(resource.data, request.resource.data);
+      }
+
+      match /consultations/{consultationId} {
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid) && isValidConsultation(request.resource.data);
+        allow update: if isOwner(uid)
+          && isValidConsultationUpdate(resource.data, request.resource.data);
+      }
+
+      match /labTests/{testId} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid) && isValidLabTest(request.resource.data);
+      }
+
+      match /labOrders/{labOrderId} {
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid) && isValidLabOrder(request.resource.data);
+        allow update: if isOwner(uid) && isValidLabOrder(request.resource.data)
+          && isValidLabOrderUpdate(resource.data, request.resource.data);
+      }
+
+      match /stockItems/{stockItemId} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid) && isValidStockItem(request.resource.data);
+      }
+
+      match /prescriptions/{prescriptionId} {
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid) && isValidPrescription(request.resource.data);
+        allow update: if isOwner(uid) && isValidPrescription(request.resource.data)
+          && isValidPrescriptionUpdate(resource.data, request.resource.data);
+      }
+
+      match /invoices/{invoiceId} {
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid) && isValidNewInvoice(request.resource.data);
+        allow update: if isOwner(uid)
+          && isValidInvoiceUpdate(resource.data, request.resource.data);
+      }
+
+      // Append-only: entries can be created and read, never changed or removed.
+      match /auditLog/{entryId} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid) && isValidAuditEntry(request.resource.data);
+        allow update, delete: if false;
+      }
+
+      // Only the single `state` document exists in meta.
+      match /meta/{docId} {
+        allow read, delete: if isOwner(uid) && docId == 'state';
+        allow create, update: if isOwner(uid) && docId == 'state'
+          && isValidMetaState(request.resource.data);
+      }
+    }
+
+    // Everything outside users/{uid}/... is denied by default (no match).
+  }
+}
