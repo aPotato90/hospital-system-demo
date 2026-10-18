@@ -46,6 +46,11 @@ hospital management product, but it is a **demo with fake data only**.
 - Money is Nigerian naira stored as **integer kobo**. Format only with
   `formatNaira()` (`Intl.NumberFormat("en-NG", { style: "currency", currency: "NGN" })`).
 - Firestore Timestamps are converted to `Date` in the repo helpers.
+- Rules budget: Firestore stops at 1000 evaluated expressions per document.
+  Worst-case invoices and consultations are close to it; keep element checks
+  inline and regex-based, skip unchanged arrays, append invoice payments one at
+  a time, and re-run `npm run test:rules` (it has worst-case tests) after any
+  rules change.
 
 ## UI quality bar
 
@@ -78,4 +83,6 @@ npm run build
 ```
 
 `npm run test:e2e` runs the browser suite against the Auth and Firestore
-emulators at 375/768/1280 px in both themes, with axe-core checks.
+emulators at 375/768/1280 px in both themes, with axe-core checks and a
+no-console-errors guard. In cloud sandboxes without the Playwright browser
+download, set `PLAYWRIGHT_CHROMIUM_PATH` to a local Chromium.
