@@ -191,7 +191,7 @@ describe("field validation", () => {
   it("only accepts example.com staff emails", async () => {
     const ref = doc(alice, path(ALICE, "staff", "stf-01"));
     await assertFails(
-      setDoc(ref, { ...f.staff(), email: "someone@gmail.com" }),
+      setDoc(ref, { ...f.staff(), email: "someone@mail.test" }),
     );
     await assertFails(setDoc(ref, { ...f.staff(), role: "superuser" }));
     await assertFails(setDoc(ref, { ...f.staff(), department: "Surgery" }));

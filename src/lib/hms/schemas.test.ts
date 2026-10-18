@@ -203,7 +203,7 @@ describe("staffSchema", () => {
         .success,
     ).toBe(true);
     expect(
-      staffSchema.safeParse({ ...staff, email: "someone@gmail.com" }).success,
+      staffSchema.safeParse({ ...staff, email: "someone@mail.test" }).success,
     ).toBe(false);
   });
 });
