@@ -6,7 +6,15 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "emulators": "firebase emulators:start --only auth,firestore --project demo-hms",
+    "test:rules": "firebase emulators:exec --only firestore --project demo-hms \"vitest run --config vitest.rules.config.mts\"",
+    "test:e2e": "firebase emulators:exec --only auth,firestore --project demo-hms \"playwright test\""
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.2",
@@ -45,5 +53,8 @@
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^5.0.5"
+  },
+  "engines": {
+    "node": ">=20.9"
   }
 }
