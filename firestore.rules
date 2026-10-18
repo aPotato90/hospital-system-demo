@@ -140,11 +140,14 @@ service cloud.firestore {
       };
     }
 
+    // resulted -> collected is the demo's Admin "undo result" (the screen
+    // offers it to Admin only; rules cannot see the demo role). It clears the
+    // result, see isValidLabOrder.
     function labOrderTransitions() {
       return {
         'requested': ['collected'],
         'collected': ['resulted'],
-        'resulted': []
+        'resulted': ['collected']
       };
     }
 
@@ -345,8 +348,9 @@ service cloud.firestore {
           : d.resultedAt == null && d.resultText == '');
     }
 
-    // Only status, result and result time change; a resulted order is final;
-    // the result time of a new result is the server time.
+    // Only status, result and result time change; a resulted result cannot be
+    // edited in place (only undone back to collected, which clears it); the
+    // result time of a new result is the server time.
     function isValidLabOrderUpdate(before, after) {
       return after.diff(before).affectedKeys().hasOnly(['status', 'resultText', 'resultedAt'])
         && (after.status == before.status
@@ -371,6 +375,15 @@ service cloud.firestore {
         && isKobo(d.unitPriceKobo);
     }
 
+    // Details (name, price, reorder level...) and the count change in separate
+    // writes: a write that changes `quantity` changes nothing else. Receiving
+    // stock raises it; dispensing lowers it (and the prescription rule checks
+    // the drop matches the dispensed quantity). It never goes below zero.
+    function isValidStockItemUpdate(before, after) {
+      return after.quantity == before.quantity
+        || after.diff(before).affectedKeys().hasOnly(['quantity']);
+    }
+
     // ---------------------------------------------------------------------
     // Prescriptions: users/{uid}/prescriptions/{prescriptionId}
     // ---------------------------------------------------------------------
@@ -388,14 +401,24 @@ service cloud.firestore {
         && (d.status == 'dispensed' ? d.dispensedAt is timestamp : d.dispensedAt == null);
     }
 
+    // Dispensing takes the prescribed quantity off the stock item in the same
+    // batched write: after the batch the item holds exactly `quantity` fewer
+    // units (and the stock rule keeps it at zero or more, so dispensing more
+    // than is on hand is refused).
+    function isStockDecremented(uid, rx) {
+      let path = /databases/$(database)/documents/users/$(uid)/stockItems/$(rx.stockItemId);
+      return getAfter(path).data.quantity == get(path).data.quantity - rx.quantity;
+    }
+
     // Only status and dispensed time change, following the table; dispensing
-    // records the server time.
-    function isValidPrescriptionUpdate(before, after) {
+    // records the server time and decrements the stock.
+    function isValidPrescriptionUpdate(uid, before, after) {
       return after.diff(before).affectedKeys().hasOnly(['status', 'dispensedAt'])
         && (after.status == before.status
           ? after.diff(before).affectedKeys().size() == 0
           : after.status in prescriptionTransitions()[before.status]
-            && after.dispensedAt == request.time);
+            && after.dispensedAt == request.time
+            && isStockDecremented(uid, after));
     }
 
     // ---------------------------------------------------------------------
@@ -585,14 +608,16 @@ service cloud.firestore {
 
       match /stockItems/{stockItemId} {
         allow read, delete: if isOwner(uid);
-        allow create, update: if isOwner(uid) && isValidStockItem(request.resource.data);
+        allow create: if isOwner(uid) && isValidStockItem(request.resource.data);
+        allow update: if isOwner(uid) && isValidStockItem(request.resource.data)
+          && isValidStockItemUpdate(resource.data, request.resource.data);
       }
 
       match /prescriptions/{prescriptionId} {
         allow read, delete: if isOwner(uid);
         allow create: if isOwner(uid) && isValidPrescription(request.resource.data);
         allow update: if isOwner(uid) && isValidPrescription(request.resource.data)
-          && isValidPrescriptionUpdate(resource.data, request.resource.data);
+          && isValidPrescriptionUpdate(uid, resource.data, request.resource.data);
       }
 
       match /invoices/{invoiceId} {
