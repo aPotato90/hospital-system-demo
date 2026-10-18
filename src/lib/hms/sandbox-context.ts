@@ -10,7 +10,15 @@ export type Sandbox = {
   uid: string;
   meta: MetaState;
   role: Role;
+  /** Persist the demo role (a UI demonstration, not access control). */
   setRole: (role: Role) => Promise<void>;
+  /** Delete all sandbox data and seed it again. */
+  resetDemo: () => Promise<void>;
+  /**
+   * Delete the sandbox (best effort) and sign out. Resolves to false when
+   * some data could not be deleted.
+   */
+  signOut: () => Promise<boolean>;
 };
 
 export const SandboxContext = createContext<Sandbox | null>(null);
