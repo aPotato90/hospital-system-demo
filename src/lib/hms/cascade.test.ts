@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   describeCascade,
+  invoiceReplaySteps,
   planPatientDeletion,
   type PatientRecords,
 } from "./cascade";
@@ -128,5 +129,42 @@ describe("describeCascade", () => {
         invoices: 0,
       }),
     ).toBe("1 appointment");
+  });
+});
+
+describe("invoiceReplaySteps", () => {
+  it("replays payments one at a time with matching totals and status", () => {
+    const at = new Date();
+    const invoice = {
+      ...data.invoices[0],
+      totalKobo: 10_000,
+      payments: [
+        { amountKobo: 2_000, method: "cash" as const, at },
+        { amountKobo: 3_000, method: "card" as const, at },
+        { amountKobo: 5_000, method: "transfer" as const, at },
+      ],
+      paidKobo: 10_000,
+      status: "paid" as const,
+    };
+    const steps = invoiceReplaySteps(invoice);
+    expect(steps.map((s) => s.payments.length)).toEqual([1, 2, 3]);
+    expect(steps.map((s) => s.paidKobo)).toEqual([2_000, 5_000, 10_000]);
+    expect(steps.map((s) => s.status)).toEqual([
+      "part-paid",
+      "part-paid",
+      "paid",
+    ]);
+    expect(steps.at(-1)).toEqual(invoice);
+  });
+
+  it("is a single step for zero or one payment", () => {
+    const unpaid = {
+      ...data.invoices[0],
+      payments: [],
+      paidKobo: 0,
+      status: "unpaid" as const,
+      totalKobo: 5,
+    };
+    expect(invoiceReplaySteps(unpaid)).toEqual([unpaid]);
   });
 });

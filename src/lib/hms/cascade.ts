@@ -4,6 +4,7 @@ import type { Invoice } from "./invoice";
 import type { LabOrder } from "./lab-order";
 import type { Patient } from "./patient";
 import type { Prescription } from "./prescription";
+import { invoiceStatusFor } from "./transitions";
 import type { CollectionName } from "./repo";
 
 /** Everything stored about one patient, as loaded before a delete. */
@@ -136,4 +137,38 @@ export function describeCascade(
   if (parts.length === 0) return "no other records";
   if (parts.length === 1) return parts[0];
   return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+}
+
+type InvoiceLike = {
+  totalKobo: number;
+  paidKobo: number;
+  status: string;
+  payments: { amountKobo: number }[];
+};
+
+/**
+ * The rules accept at most one payment on a new invoice and one more per
+ * update, so recreating an invoice is a sequence of states: the invoice with
+ * its first payment, then one appended payment at a time.
+ */
+export function invoiceReplaySteps<T extends InvoiceLike>(invoice: T): T[] {
+  const steps: T[] = [];
+  const upTo = (n: number): T => {
+    const payments = invoice.payments.slice(0, n);
+    const paidKobo = payments.reduce((sum, p) => sum + p.amountKobo, 0);
+    return {
+      ...invoice,
+      payments,
+      paidKobo,
+      status: invoiceStatusFor(invoice.totalKobo, paidKobo),
+    };
+  };
+  for (
+    let n = Math.min(1, invoice.payments.length);
+    n <= invoice.payments.length;
+    n++
+  ) {
+    steps.push(upTo(n));
+  }
+  return steps;
 }

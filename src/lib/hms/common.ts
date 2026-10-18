@@ -96,6 +96,7 @@ export const clinicalDepartmentSchema = z.enum(CLINICAL_DEPARTMENTS);
 /** `YYYY-MM-DD` calendar date (stored as a string to avoid time zone drift). */
 export const isoDateSchema = z
   .string()
+  .min(1, "Required")
   .regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD")
   .refine((value) => {
     const date = new Date(`${value}T00:00:00Z`);

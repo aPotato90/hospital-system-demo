@@ -1,6 +1,7 @@
 import {
   getDocs,
   query,
+  setDoc,
   where,
   writeBatch,
   type Firestore,
@@ -13,7 +14,12 @@ import {
 } from "./appointment";
 import { addAuditEntry } from "./audit";
 import { chunkWrites } from "./batches";
-import type { PatientDeletionPlan, PatientRecords } from "./cascade";
+import {
+  invoiceReplaySteps,
+  type PatientDeletionPlan,
+  type PatientRecords,
+} from "./cascade";
+import type { Invoice } from "./invoice";
 import {
   nextPatientNo,
   patientFormSchema,
@@ -132,12 +138,24 @@ export async function deletePatient(
   }
 }
 
-/** Undo a delete by recreating every document from the plan's snapshot. */
+/**
+ * Undo a delete by recreating every document from the plan's snapshot.
+ * Invoices with several payments are replayed one payment per write, as the
+ * rules require.
+ */
 export async function restorePatient(
   { db, uid, role }: Ctx,
   plan: PatientDeletionPlan,
 ) {
-  const chunks = chunkWrites(plan.restore, 499);
+  const replays: { id: string; steps: Record<string, unknown>[] }[] = [];
+  const firstWrites = plan.restore.map((write) => {
+    if (write.collection !== "invoices") return write;
+    const steps = invoiceReplaySteps(write.data as unknown as Invoice);
+    if (steps.length > 1) replays.push({ id: write.id, steps: steps.slice(1) });
+    return { ...write, data: steps[0] as unknown as Record<string, unknown> };
+  });
+
+  const chunks = chunkWrites(firstWrites, 499);
   for (const [i, chunk] of chunks.entries()) {
     const batch = writeBatch(db);
     chunk.forEach(({ collection, id, data }) =>
@@ -155,6 +173,15 @@ export async function restorePatient(
       });
     }
     await batch.commit();
+  }
+
+  for (const { id, steps } of replays) {
+    for (const step of steps) {
+      await setDoc(
+        rawDocRef(db, uid, "invoices", id),
+        timestampsToDates(step) as object,
+      );
+    }
   }
 }
 

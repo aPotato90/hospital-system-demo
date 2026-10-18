@@ -128,6 +128,17 @@ describe("generateSeedData", () => {
     );
   });
 
+  it("books each patient at most once per day and each doctor once per slot", () => {
+    const days = data.appointments.map(
+      (a) => `${a.patientId}@${a.scheduledAt.toDateString()}`,
+    );
+    expect(new Set(days).size).toBe(days.length);
+    const slots = data.appointments.map(
+      (a) => `${a.doctorId}@${a.scheduledAt.getTime()}`,
+    );
+    expect(new Set(slots).size).toBe(slots.length);
+  });
+
   it("covers every role and department with staff", () => {
     expect(new Set(data.staff.map((s) => s.role))).toEqual(new Set(ROLES));
     expect(new Set(data.staff.map((s) => s.department))).toEqual(

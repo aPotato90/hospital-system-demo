@@ -544,6 +544,7 @@ export function generateSeedData(anchor: Date = new Date()): SeedData {
   const invoices: WithId<InvoiceData>[] = [];
 
   const usedSlots = new Set<string>();
+  const bookedDays = new Set<string>();
   let todayIndex = 0;
 
   appointmentDayOffsets(rand).forEach((offset, i) => {
@@ -555,8 +556,13 @@ export function generateSeedData(anchor: Date = new Date()): SeedData {
       "Obstetrics",
     ] as const);
     const doctor = rand.pick(doctorsByDept.get(department) ?? []);
-    const candidates = patients.filter((p) => suitable(department, p, day));
+    // Each patient has at most one appointment per day.
+    const candidates = patients.filter(
+      (p) =>
+        suitable(department, p, day) && !bookedDays.has(`${p.id}@${offset}`),
+    );
     const patient = rand.pick(candidates);
+    bookedDays.add(`${patient.id}@${offset}`);
 
     // A free 30-minute slot between 08:00 and 16:30 for this doctor.
     let scheduledAt: Date;
