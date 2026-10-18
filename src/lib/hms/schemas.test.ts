@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-  bookAppointmentFormSchema,
   combineDateTime,
   formatPatientNo,
   invoiceSchema,
   labOrderSchema,
+  makeBookAppointmentFormSchema,
   nextPatientNo,
   patientFormSchema,
   prescriptionSchema,
@@ -58,6 +58,10 @@ describe("patient numbers", () => {
 });
 
 describe("bookAppointmentFormSchema", () => {
+  // A fixed "now" well before the booking, so the future rule always passes.
+  const bookAppointmentFormSchema = makeBookAppointmentFormSchema(
+    () => new Date(2026, 0, 1, 9, 0),
+  );
   const valid = {
     patientId: "pat-001",
     department: "Paediatrics",

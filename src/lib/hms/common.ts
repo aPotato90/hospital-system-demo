@@ -105,5 +105,15 @@ export const isoDateSchema = z
     );
   }, "Not a real date");
 
+/**
+ * A day's calendar date in the browser's local time zone, as YYYY-MM-DD.
+ * (Not `toISOString()`, which gives the UTC date: in Lagos, UTC+1, that is
+ * still "yesterday" between midnight and 01:00.)
+ */
+export function localIsoDate(now: Date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
 /** A document as returned by the repo helpers: data plus its id. */
 export type WithId<T> = T & { id: string };
