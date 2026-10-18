@@ -629,11 +629,12 @@ export function generateSeedData(anchor: Date = new Date()): SeedData {
 
     template.tests.forEach((testId) => {
       const test = testById.get(testId)!;
-      // Older orders are resulted; today's are still in the lab.
+      // Orders from the last three days are still in the lab (some samples
+      // collected), so the lab worklist has work on first entry.
       const labStatus: LabOrderStatus =
-        daysAgo >= 1
+        daysAgo >= 4
           ? "resulted"
-          : rand.chance(0.5)
+          : daysAgo >= 1 && rand.chance(0.5)
             ? "collected"
             : "requested";
       labOrders.push({
@@ -661,7 +662,8 @@ export function generateSeedData(anchor: Date = new Date()): SeedData {
 
     template.drugs.forEach(([stockItemId, , quantity]) => {
       const item = stockById.get(stockItemId)!;
-      const dispensed = daysAgo >= 1 || rand.chance(0.3);
+      // Recent prescriptions are mostly still waiting at the pharmacy.
+      const dispensed = daysAgo >= 3 || (daysAgo >= 1 && rand.chance(0.3));
       prescriptions.push({
         id: `rx-${pad(prescriptions.length + 1, 3)}`,
         consultationId,
@@ -704,6 +706,20 @@ export function generateSeedData(anchor: Date = new Date()): SeedData {
       payments,
     });
   });
+
+  // One pending prescription is for a patient whose (fake) allergy note
+  // names that drug, so the pharmacy's demo allergy flag has something to
+  // show. Prefer an antibiotic or painkiller; it is invented data.
+  const flagged =
+    prescriptions.find(
+      (p) =>
+        p.status === "pending" &&
+        ["stk-02", "stk-04", "stk-07", "stk-08"].includes(p.stockItemId),
+    ) ?? prescriptions.find((p) => p.status === "pending");
+  if (flagged) {
+    const patient = patients.find((p) => p.id === flagged.patientId)!;
+    patient.allergies = `${flagged.name.split(" ")[0]} (rash, demo record)`;
+  }
 
   return {
     patients,
