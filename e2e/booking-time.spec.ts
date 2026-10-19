@@ -1,5 +1,12 @@
 import type { Page } from "@playwright/test";
-import { choose, expect, navigate, startDemo, test } from "./fixtures";
+import {
+  choose,
+  expect,
+  lagosMorning,
+  navigate,
+  startDemo,
+  test,
+} from "./fixtures";
 
 /**
  * Regression test for the booking dialog's "future time" check, from a phone
@@ -11,36 +18,6 @@ test.skip(
   ({ viewport }) => viewport?.width !== 375,
   "Runs on the 375px mobile projects (light and dark)",
 );
-
-const LAGOS_OFFSET_MS = 60 * 60 * 1000; // UTC+1, no daylight saving
-
-/**
- * The latest instant that is 10:00 in Lagos and not in the future, so "now"
- * in the page sits mid-morning (a past and a future slot exist today) and is
- * never ahead of the real clock (auth tokens stay valid).
- */
-function lagosMorning() {
-  const now = Date.now();
-  const lagosNow = new Date(now + LAGOS_OFFSET_MS);
-  let at =
-    Date.UTC(
-      lagosNow.getUTCFullYear(),
-      lagosNow.getUTCMonth(),
-      lagosNow.getUTCDate(),
-      10,
-    ) - LAGOS_OFFSET_MS;
-  if (at > now) at -= 24 * 60 * 60 * 1000;
-  const lagosDate = (offsetDays: number) =>
-    new Date(at + LAGOS_OFFSET_MS + offsetDays * 86_400_000)
-      .toISOString()
-      .slice(0, 10);
-  return {
-    at: new Date(at),
-    yesterday: lagosDate(-1),
-    today: lagosDate(0),
-    tomorrow: lagosDate(1),
-  };
-}
 
 const morning = lagosMorning();
 // Seeded appointments sit on :00 and :30, so these slots never clash with them.
