@@ -67,8 +67,17 @@ export async function choose(
   label: string | RegExp,
   option: string | RegExp,
 ) {
-  await page.getByRole("combobox", { name: label }).click();
-  await page.getByRole("option", { name: option }).first().click();
+  // Same Radix race as switchRole: retry until the listbox has closed. While
+  // it is open Radix hides the trigger from the accessibility tree, so the
+  // retry keys off the open listbox rather than the trigger.
+  const listbox = page.getByRole("listbox");
+  await expect(async () => {
+    if ((await listbox.count()) === 0) {
+      await page.getByRole("combobox", { name: label }).click();
+    }
+    await listbox.getByRole("option", { name: option }).first().click();
+    await expect(listbox).toHaveCount(0, { timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
 }
 
 export async function expectNoHorizontalOverflow(page: Page) {
@@ -92,6 +101,10 @@ export async function expectAccessible(page: Page, context: string) {
     // page aria-hidden (data-aria-hidden) and traps focus in the overlay, so
     // the background is out of reach; the overlay itself is still audited.
     .exclude('[data-aria-hidden="true"]')
+    // Sonner fades collapsed (stacked, non-front) and exiting toasts to
+    // opacity 0; axe would measure them mid-fade. The front toast is audited.
+    .exclude('[data-sonner-toast][data-front="false"][data-expanded="false"]')
+    .exclude('[data-sonner-toast][data-removed="true"]')
     .analyze();
   const summary = results.violations.map(
     (v) =>
