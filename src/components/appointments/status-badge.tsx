@@ -1,7 +1,13 @@
 import { cn } from "@/lib/utils";
 import {
   APPOINTMENT_STATUS_LABELS,
+  INVOICE_STATUS_LABELS,
+  LAB_ORDER_STATUS_LABELS,
+  PRESCRIPTION_STATUS_LABELS,
   type AppointmentStatus,
+  type InvoiceStatus,
+  type LabOrderStatus,
+  type PrescriptionStatus,
 } from "@/lib/hms/transitions";
 
 const STYLES: Record<string, string> = {
@@ -18,21 +24,32 @@ const STYLES: Record<string, string> = {
   "part-paid":
     "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200",
   paid: "bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200",
+  requested: "bg-sky-100 text-sky-900 dark:bg-sky-950 dark:text-sky-200",
+  collected:
+    "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200",
+  resulted:
+    "bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200",
+  pending: "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200",
+  dispensed:
+    "bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200",
 };
 
 const LABELS: Record<string, string> = {
   ...APPOINTMENT_STATUS_LABELS,
-  unpaid: "Unpaid",
-  "part-paid": "Part-paid",
-  paid: "Paid",
+  ...INVOICE_STATUS_LABELS,
+  ...LAB_ORDER_STATUS_LABELS,
+  ...PRESCRIPTION_STATUS_LABELS,
 };
+
+export type BadgeStatus =
+  AppointmentStatus | InvoiceStatus | LabOrderStatus | PrescriptionStatus;
 
 /** Colour-coded status pill; the text always carries the meaning. */
 export function StatusBadge({
   status,
   className,
 }: {
-  status: AppointmentStatus | "unpaid" | "part-paid" | "paid";
+  status: BadgeStatus;
   className?: string;
 }) {
   return (

@@ -49,8 +49,16 @@ export default function AboutPage() {
                 integer kobo and shown in naira, and an append-only audit trail.
               </li>
               <li>
+                One patient journey across six roles: reception registers and
+                books, the doctor records a consultation with prescriptions and
+                lab requests, the lab enters results, the pharmacy dispenses
+                against stock, the cashier records payments, and the admin
+                dashboard shows the totals, charts and audit trail.
+              </li>
+              <li>
                 Accessibility work: keyboard navigation, visible focus, skip
-                link, landmarks and contrast checks.
+                link, landmarks, contrast checks and a data table behind every
+                chart.
               </li>
             </ul>
           </section>
@@ -73,9 +81,13 @@ export default function AboutPage() {
             <h2 id="not-a-medical-product">Not a medical product</h2>
             <p>
               This demo gives no medical advice and provides no clinical
-              decision support. It makes no claim to meet any healthcare,
-              privacy or data-protection regulation and must not be used to
-              store or process real patient information.
+              decision support: no dose, diagnosis, triage or drug-interaction
+              suggestions. Consultation notes, results and doses are typed by
+              hand and fake. The pharmacy&apos;s allergy flag is a simple text
+              match shown as a demo helper, not a safety check. It makes no
+              claim to meet any healthcare, privacy or data-protection
+              regulation and must not be used to store or process real patient
+              information.
             </p>
           </section>
 
@@ -85,8 +97,10 @@ export default function AboutPage() {
               Inside the app you can switch between Receptionist, Doctor, Lab,
               Pharmacist, Cashier and Admin. Switching changes which screens
               appear in the navigation so you can see each person&apos;s view.
-              It is a UI demonstration only, not access control: in this demo
-              you are always the only user of your own sandbox.
+              It is a UI demonstration only, not real authorisation or access
+              control: any visitor can switch to any role, and in this demo you
+              are always the only user of your own sandbox. A screen outside the
+              current role just says which role it is for and offers a switch.
             </p>
           </section>
 

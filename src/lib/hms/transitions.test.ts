@@ -49,12 +49,12 @@ describe("status transition tables", () => {
     for (const s of ["completed", "cancelled", "no-show"] as const) {
       expect(APPOINTMENT_TRANSITIONS[s]).toEqual([]);
     }
-    expect(LAB_ORDER_TRANSITIONS.resulted).toEqual([]);
+    expect(LAB_ORDER_TRANSITIONS.resulted).toEqual(["collected"]);
     expect(PRESCRIPTION_TRANSITIONS.dispensed).toEqual([]);
     expect(INVOICE_TRANSITIONS.paid).toEqual([]);
   });
 
-  it("lab orders and prescriptions only move forward", () => {
+  it("lab orders move forward, with an undo from resulted to collected", () => {
     expect(canTransition(LAB_ORDER_TRANSITIONS, "requested", "collected")).toBe(
       true,
     );
@@ -62,6 +62,9 @@ describe("status transition tables", () => {
       false,
     );
     expect(canTransition(LAB_ORDER_TRANSITIONS, "resulted", "collected")).toBe(
+      true,
+    );
+    expect(canTransition(LAB_ORDER_TRANSITIONS, "resulted", "requested")).toBe(
       false,
     );
     expect(

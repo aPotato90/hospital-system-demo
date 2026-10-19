@@ -13,6 +13,7 @@ import { useMemo, useState } from "react";
 import { StatusBadge } from "@/components/appointments/status-badge";
 import { ErrorState, ListSkeleton } from "@/components/app/live-state";
 import { RoleGate } from "@/components/app/role-gate";
+import { LabResultsList } from "@/components/clinical/lab-results-list";
 import { Button } from "@/components/ui/button";
 import {
   formatAge,
@@ -75,6 +76,7 @@ export function PatientDetail() {
   const appointments = useCollection("appointments", byPatient);
   const consultations = useCollection("consultations", byPatient);
   const invoices = useCollection("invoices", byPatient);
+  const labOrders = useCollection("labOrders", byPatient);
   const staff = useCollection("staff");
   const staffById = useById(staff.data);
   const consultationByAppointment = useMemo(
@@ -301,6 +303,27 @@ export function PatientDetail() {
                 ))}
               </ul>
             </>
+          )}
+        </Section>
+      </div>
+
+      <div className="mt-4">
+        <Section id="lab-results-heading" title="Lab results">
+          {labOrders.error ? (
+            <ErrorState error={labOrders.error} onRetry={labOrders.retry} />
+          ) : labOrders.loading ? (
+            <ListSkeleton rows={2} />
+          ) : (
+            <LabResultsList
+              orders={[...(labOrders.data ?? [])].sort((a, b) =>
+                a.status === b.status
+                  ? a.name.localeCompare(b.name)
+                  : a.status === "resulted"
+                    ? 1
+                    : -1,
+              )}
+              empty="No lab tests for this patient."
+            />
           )}
         </Section>
       </div>

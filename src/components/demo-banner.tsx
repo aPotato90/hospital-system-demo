@@ -8,6 +8,7 @@ export function DemoBanner() {
   return (
     <aside
       aria-label="Demo notice"
+      data-print-hide
       className="border-b border-black/5 bg-banner px-4 py-2 text-center text-sm font-medium text-banner-foreground dark:border-white/10"
     >
       <p className="mx-auto flex max-w-5xl items-center justify-center gap-2">

@@ -49,9 +49,16 @@ export async function navigate(page: Page, label: string) {
 }
 
 export async function switchRole(page: Page, label: string) {
-  await page.getByTestId("role-switcher").click();
-  await page.getByRole("option", { name: label, exact: true }).click();
-  await expect(page.getByTestId("role-switcher")).toHaveText(label);
+  const trigger = page.getByTestId("role-switcher");
+  // Radix can drop an option click that lands while a busy page is still
+  // rendering the opened listbox, so retry until the switch sticks.
+  await expect(async () => {
+    if ((await trigger.getAttribute("aria-expanded")) !== "true") {
+      await trigger.click();
+    }
+    await page.getByRole("option", { name: label, exact: true }).click();
+    await expect(trigger).toHaveText(label, { timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
 }
 
 /** Pick an option in a shadcn (Radix) select by its label. */
@@ -60,8 +67,17 @@ export async function choose(
   label: string | RegExp,
   option: string | RegExp,
 ) {
-  await page.getByRole("combobox", { name: label }).click();
-  await page.getByRole("option", { name: option }).first().click();
+  // Same Radix race as switchRole: retry until the listbox has closed. While
+  // it is open Radix hides the trigger from the accessibility tree, so the
+  // retry keys off the open listbox rather than the trigger.
+  const listbox = page.getByRole("listbox");
+  await expect(async () => {
+    if ((await listbox.count()) === 0) {
+      await page.getByRole("combobox", { name: label }).click();
+    }
+    await listbox.getByRole("option", { name: option }).first().click();
+    await expect(listbox).toHaveCount(0, { timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
 }
 
 export async function expectNoHorizontalOverflow(page: Page) {
@@ -85,10 +101,14 @@ export async function expectAccessible(page: Page, context: string) {
     // page aria-hidden (data-aria-hidden) and traps focus in the overlay, so
     // the background is out of reach; the overlay itself is still audited.
     .exclude('[data-aria-hidden="true"]')
+    // Sonner fades collapsed (stacked, non-front) and exiting toasts to
+    // opacity 0; axe would measure them mid-fade. The front toast is audited.
+    .exclude('[data-sonner-toast][data-front="false"][data-expanded="false"]')
+    .exclude('[data-sonner-toast][data-removed="true"]')
     .analyze();
   const summary = results.violations.map(
     (v) =>
-      `${v.id} (${v.impact}): ${v.help}\n    ${v.nodes.map((n) => n.target.join(" ")).join("\n    ")}`,
+      `${v.id} (${v.impact}): ${v.help}\n    ${v.nodes.map((n) => `${n.target.join(" ")}: ${n.failureSummary ?? ""}`).join("\n    ")}`,
   );
   expect(summary, `axe violations on ${context}`).toEqual([]);
 }
@@ -135,4 +155,34 @@ export async function expectSavedRole(page: Page, role: string) {
       return body.fields?.activeRole?.stringValue;
     })
     .toBe(role);
+}
+
+const LAGOS_OFFSET_MS = 60 * 60 * 1000; // UTC+1, no daylight saving
+
+/**
+ * The latest instant that is 10:00 in Lagos and not in the future, so "now"
+ * in the page sits mid-morning (a past and a future slot exist today) and is
+ * never ahead of the real clock (auth tokens stay valid).
+ */
+export function lagosMorning() {
+  const now = Date.now();
+  const lagosNow = new Date(now + LAGOS_OFFSET_MS);
+  let at =
+    Date.UTC(
+      lagosNow.getUTCFullYear(),
+      lagosNow.getUTCMonth(),
+      lagosNow.getUTCDate(),
+      10,
+    ) - LAGOS_OFFSET_MS;
+  if (at > now) at -= 24 * 60 * 60 * 1000;
+  const lagosDate = (offsetDays: number) =>
+    new Date(at + LAGOS_OFFSET_MS + offsetDays * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+  return {
+    at: new Date(at),
+    yesterday: lagosDate(-1),
+    today: lagosDate(0),
+    tomorrow: lagosDate(1),
+  };
 }

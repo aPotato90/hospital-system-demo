@@ -63,9 +63,8 @@ test("sign-in, seeding, persistence after reload and role switching", async ({
     await switchRole(page, "Doctor");
     await page.waitForURL("**/app/consultations");
     await expect(
-      page.getByRole("heading", { level: 1, name: "Consultations" }),
+      page.getByRole("heading", { level: 1, name: "My queue" }),
     ).toBeVisible();
-    await expect(page.getByText("Coming in the next step")).toBeVisible();
     if (isMobile(page)) {
       await page.getByRole("button", { name: "Open navigation menu" }).click();
       const sheet = page.getByRole("dialog");
@@ -92,8 +91,13 @@ test("sign-in, seeding, persistence after reload and role switching", async ({
     await page.goto("/app/patients");
     await expect(
       page.getByRole("heading", {
-        name: "Patients is not part of the Doctor view",
+        name: "This screen is for Receptionist and Admin",
       }),
+    ).toBeVisible();
+    await expect(
+      page
+        .getByText("Patients is not part of the Doctor view")
+        .filter({ visible: true }),
     ).toBeVisible();
     await page.getByRole("button", { name: "Switch to Receptionist" }).click();
     await expect(

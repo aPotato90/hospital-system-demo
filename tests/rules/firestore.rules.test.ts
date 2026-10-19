@@ -176,7 +176,11 @@ describe("field validation", () => {
       }),
     );
     await assertSucceeds(
-      setDoc(ref, { ...f.stockItem(), unitPriceKobo: 0, quantity: 0 }),
+      setDoc(doc(alice, path(ALICE, "stockItems", "stk-02")), {
+        ...f.stockItem(),
+        unitPriceKobo: 0,
+        quantity: 0,
+      }),
     );
     await assertFails(
       setDoc(ref, { ...f.stockItem(), unitPriceKobo: 100_000_000_001 }),
@@ -241,6 +245,29 @@ describe("field validation", () => {
     await assertSucceeds(updateDoc(ref, { notes: "Updated demo note" }));
     await assertFails(updateDoc(ref, { patientId: "pat-999" }));
     await assertFails(updateDoc(ref, { createdAt: new Date() }));
+  });
+});
+
+describe("stock counts", () => {
+  const ref = () => doc(alice, path(ALICE, "stockItems", "stk-01"));
+  beforeEach(async () => {
+    await seedDoc(ref().path, { ...f.stockItem(), quantity: 100 });
+  });
+
+  it("receives stock as a quantity-only write", async () => {
+    await assertSucceeds(updateDoc(ref(), { quantity: 160 }));
+    await assertFails(updateDoc(ref(), { quantity: 100_001 }));
+  });
+
+  it("edits details only while the count stays the same", async () => {
+    await assertSucceeds(
+      updateDoc(ref(), { unitPriceKobo: 2_500, reorderLevel: 30 }),
+    );
+    await assertFails(updateDoc(ref(), { unitPriceKobo: 3_000, quantity: 90 }));
+  });
+
+  it("never goes below zero", async () => {
+    await assertFails(updateDoc(ref(), { quantity: -1 }));
   });
 });
 
@@ -365,7 +392,7 @@ describe("status transitions", () => {
       else await assertFails(write);
     });
 
-    it("stamps results with the server time and keeps them final", async () => {
+    it("stamps results with the server time and never edits them in place", async () => {
       const ref = doc(alice, path(ALICE, "labOrders", "lab-001"));
       await seedDoc(ref.path, f.labOrder("collected"));
       await assertFails(
@@ -387,6 +414,15 @@ describe("status transitions", () => {
       await assertFails(
         updateDoc(ref, { resultText: "Edited after the fact" }),
       );
+      // The Admin undo goes back to collected and must clear the result.
+      await assertFails(updateDoc(ref, { status: "collected" }));
+      await assertSucceeds(
+        updateDoc(ref, {
+          status: "collected",
+          resultText: "",
+          resultedAt: null,
+        }),
+      );
     });
   });
 
@@ -397,18 +433,65 @@ describe("status transitions", () => {
 
     it.each(pairs)("%s -> %s", async (from, to) => {
       const ref = doc(alice, path(ALICE, "prescriptions", "rx-001"));
+      const stock = doc(alice, path(ALICE, "stockItems", "stk-01"));
       await seedDoc(ref.path, f.prescription(from));
-      const next =
-        from === to
-          ? { status: to }
-          : {
-              status: to,
-              dispensedAt: to === "dispensed" ? serverTimestamp() : null,
-            };
-      const write = updateDoc(ref, next);
+      await seedDoc(stock.path, { ...f.stockItem(), quantity: 50 });
+      // A real dispense also takes the quantity off the stock item.
+      const batch = writeBatch(alice);
+      if (from === to) batch.update(ref, { status: to });
+      else {
+        batch.update(ref, {
+          status: to,
+          dispensedAt: to === "dispensed" ? serverTimestamp() : null,
+        });
+        batch.update(stock, { quantity: 50 - f.prescription().quantity });
+      }
+      const write = batch.commit();
       if (canTransition(PRESCRIPTION_TRANSITIONS, from, to))
         await assertSucceeds(write);
       else await assertFails(write);
+    });
+
+    describe("dispensing with the stock decrement", () => {
+      const rx = () => doc(alice, path(ALICE, "prescriptions", "rx-001"));
+      const stock = () => doc(alice, path(ALICE, "stockItems", "stk-01"));
+      const dispense = (stockQuantity: number | null) => {
+        const batch = writeBatch(alice);
+        batch.update(rx(), {
+          status: "dispensed",
+          dispensedAt: serverTimestamp(),
+        });
+        if (stockQuantity !== null)
+          batch.update(stock(), { quantity: stockQuantity });
+        return batch.commit();
+      };
+      beforeEach(async () => {
+        await seedDoc(rx().path, f.prescription("pending")); // quantity 10
+        await seedDoc(stock().path, { ...f.stockItem(), quantity: 25 });
+      });
+
+      it("takes exactly the prescribed quantity", async () => {
+        await assertSucceeds(dispense(15));
+      });
+      it("refuses a dispense that leaves stock untouched", async () => {
+        await assertFails(dispense(null));
+      });
+      it("refuses the wrong decrement", async () => {
+        await assertFails(dispense(16));
+        await assertFails(dispense(5));
+      });
+      it("refuses dispensing more than is on hand", async () => {
+        await seedDoc(stock().path, { ...f.stockItem(), quantity: 6 });
+        await assertFails(dispense(-4));
+      });
+      it("refuses when the stock item is missing", async () => {
+        await env.withSecurityRulesDisabled(async (ctx) => {
+          await deleteDoc(
+            doc(ctx.firestore() as unknown as Firestore, stock().path),
+          );
+        });
+        await assertFails(dispense(null));
+      });
     });
 
     it("stamps dispensing with the server time", async () => {
@@ -576,6 +659,35 @@ describe("worst-case documents stay under the evaluation limit", () => {
         f.consultation(0, 11),
       ),
     );
+  });
+
+  it("a full consultation save batch at the caps", async () => {
+    // What the doctor's "Save and complete" writes at the maximum: the
+    // consultation (10 + 10), ten prescriptions, ten lab orders, the invoice
+    // (folded to three lines) and the appointment, all in one batch.
+    const appt = doc(alice, path(ALICE, "appointments", "apt-001"));
+    await seedDoc(appt.path, f.appointment("in-consultation"));
+    const batch = writeBatch(alice);
+    const con = f.consultation(10, 10);
+    batch.set(doc(alice, path(ALICE, "consultations", "con-max")), con);
+    for (let i = 0; i < 10; i++) {
+      batch.set(doc(alice, path(ALICE, "prescriptions", `rx-${i}`)), {
+        ...f.prescription("pending"),
+        consultationId: "con-max",
+        stockItemId: `stk-${i}`,
+      });
+      batch.set(doc(alice, path(ALICE, "labOrders", `lab-${i}`)), {
+        ...f.labOrder("requested"),
+        consultationId: "con-max",
+        testId: `tst-${i}`,
+      });
+    }
+    batch.set(doc(alice, path(ALICE, "invoices", "inv-max")), {
+      ...f.invoice([], 3),
+      consultationId: "con-max",
+    });
+    batch.update(appt, { status: "completed" });
+    await assertSucceeds(batch.commit());
   });
 
   it("checks every element, including the last one", async () => {

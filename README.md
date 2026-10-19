@@ -10,10 +10,14 @@ General Hospital**, built by Emmanuel Kelvin as a portfolio project.
 > and makes no claim to meet any healthcare, privacy or data-protection
 > regulation.
 
-![Screenshot placeholder: the appointments screen](docs/screenshots/desktop-light-appointments.png)
+![Admin dashboard with KPIs and charts](docs/screenshots/desktop-light-dashboard.png)
 
-<!-- Screenshot placeholder: swap in your own captures with
+<!-- Regenerate the screenshots with
      SCREENSHOTS=1 npm run test:e2e -- e2e/screenshots.spec.ts -->
+
+| Doctor: consultation                                             | Pharmacy: dispensing queue                               | Billing: invoice and receipt                          |
+| ---------------------------------------------------------------- | -------------------------------------------------------- | ----------------------------------------------------- |
+| ![Consultation](docs/screenshots/desktop-light-consultation.png) | ![Pharmacy](docs/screenshots/desktop-light-pharmacy.png) | ![Invoice](docs/screenshots/desktop-dark-invoice.png) |
 
 ## What it demonstrates
 
@@ -32,16 +36,47 @@ General Hospital**, built by Emmanuel Kelvin as a portfolio project.
 - **Typed data layer**: one Zod schema per entity, typed repository helpers
   (Timestamps become Dates, documents are validated on read) and real-time
   hooks with loading, error and retry states.
-- **Reception workflows** (this step): patient register with search, sorting
+- **Reception workflows**: patient register with search, sorting
   and paging kept in the URL; registration and editing with React Hook Form
   and Zod; patient detail with visits, invoices and allergies; a safe delete
   that shows exactly what will be removed and offers Undo; an appointment book
   with day and week views, filters, booking, check-in, no-show and
   cancellation.
+- **Doctor**: "My queue" of today's appointments for a chosen demo doctor,
+  checked-in patients first. The consultation screen shows the patient's
+  allergies prominently, their visit history and earlier results, and a form
+  for notes, diagnosis, up to 10 prescriptions and up to 10 lab requests.
+  Saving is one batched write: the consultation, pending prescriptions,
+  requested lab orders, the completed appointment and an invoice (consultation
+  fee per department plus lab and pharmacy lines). A visit can be edited until
+  something is dispensed, resulted or paid; after that it is read-only. There
+  is no clinical decision support: everything is typed by hand.
+- **Lab**: a queue by status with filters by test and date and a patient
+  search; mark a sample collected, enter a free-text result and mark it
+  resulted. Results show on the consultation and patient pages. Resulted
+  orders are read-only, except for an Admin "Undo result" that is logged.
+- **Pharmacy**: a dispensing queue that shows stock on hand and an allergy
+  flag (a plain text match, labelled as a demo helper, not a safety check).
+  Dispensing decrements stock in the same batched write and is refused when
+  stock is short. A stock list with search, category filter, sortable
+  columns, low-stock highlighting (text and icon), add/edit, receive stock and
+  delete with Undo.
+- **Billing**: invoices with a status filter, patient search and totals; an
+  invoice view with lines grouped by kind, payment history and a demo "Record
+  payment" dialog (cash, card or transfer, never more than the balance); and a
+  printable receipt with its own print stylesheet and the demo disclaimer.
+- **Admin dashboard**: KPIs (patients, today's appointments by status,
+  revenue this month, outstanding balance, low stock, pending lab orders),
+  four Recharts charts themed for light and dark with a data table behind
+  each, an activity feed and a filterable, read-only audit log. Every create,
+  status change, dispense, payment and delete writes an audit entry.
+- **A "Demo journey" panel** on the overview: six steps from registration to
+  payment, each switching to the right role and opening its screen, with
+  progress read from the audit log. It can be dismissed.
 - **A role switcher** (Receptionist, Doctor, Lab, Pharmacist, Cashier, Admin)
-  that changes the navigation. It is a UI demonstration, not access control.
-  The doctor, lab, pharmacy, billing, staff and audit screens are placeholders
-  in this step ("Coming in the next step").
+  that changes the navigation. It is a UI demonstration, not real
+  authorisation: anyone can switch to any role. A screen outside the current
+  role explains which role it is for and offers a switch.
 - **Money in naira**, stored as integer kobo and formatted with
   `Intl.NumberFormat("en-NG", { style: "currency", currency: "NGN" })`.
 - **Accessibility work**: semantic landmarks, skip link, keyboard support,
@@ -52,7 +87,7 @@ General Hospital**, built by Emmanuel Kelvin as a portfolio project.
 
 Next.js 16 (App Router, Cache Components) · React 19 · TypeScript · Tailwind
 CSS v4 · shadcn/ui (Radix) · Firebase JS SDK (Auth + Firestore, client only) ·
-Zod · React Hook Form · date-fns · Recharts (installed for the next step) ·
+Zod · React Hook Form · date-fns · Recharts ·
 Vitest · Playwright + axe-core · Prettier · npm.
 
 There is no server code, no Firebase Admin SDK and no service account. The
@@ -75,7 +110,10 @@ only configuration is public: the `NEXT_PUBLIC_FIREBASE_*` web config,
    you deploy to.
 
 The rules allow only the signed-in visitor to read and write their own
-`users/{uid}/...` documents. Payments on an invoice are appended one at a time
+`users/{uid}/...` documents. Dispensing a prescription must decrement the
+stock item by exactly the dispensed quantity in the same batch, and an
+invoice payment can never exceed the balance. **When `firestore.rules`
+changes, paste the new version into the console and publish it again.** Payments on an invoice are appended one at a time
 and only changed parts of a document are re-checked, which keeps the largest
 allowed documents inside Firestore's rule-evaluation budget; the comments in
 the rules file explain each choice.
@@ -139,20 +177,40 @@ npm run test:e2e       # Playwright against the emulators (see below)
 starts the Auth and Firestore emulators, and runs the browser suite at 375,
 768 and 1280 px in light and dark themes: sign-in and seeding, role switching,
 registering and editing patients, search and URL state, safe delete with Undo,
-booking and status changes, reset, sign out (checked against the emulator),
+booking and status changes, the whole patient journey across every role
+(register, book, check in, consult, lab result, dispense, pay, dashboard
+totals) in the Africa/Lagos time zone, reset, sign out (checked against the
+emulator),
 persistence after reload, keyboard focus, no horizontal overflow, no console
 errors, and an axe-core audit of every page and dialog. Install a browser
 first with `npx playwright install chromium`, or point
 `PLAYWRIGHT_CHROMIUM_PATH` at an existing Chromium.
+
+## Demo journey
+
+1. **Receptionist**: register a patient (Patients > Register patient).
+2. **Receptionist**: book them for later today and check them in
+   (Appointments).
+3. **Doctor**: open "My queue", start the consultation, add a prescription and
+   a lab request, then "Save and complete visit". An invoice is created.
+4. **Lab**: mark the sample collected, then enter the result.
+5. **Pharmacist**: dispense the prescription; the stock count drops.
+6. **Cashier**: open the invoice and record the payment; print the receipt.
+7. **Admin**: the dashboard KPIs, charts and activity feed reflect it all.
+
+The overview's "Demo journey" panel walks through the same steps and switches
+role for you.
 
 ## Project layout
 
 ```
 firestore.rules            Security rules (paste into the console)
 src/app/                   Routes: landing, about, /app/*
-src/components/            UI: app shell, patients, appointments, theme, shadcn/ui
+src/components/            UI: app shell, patients, appointments, doctor, lab,
+                           pharmacy, billing, admin, theme, shadcn/ui
 src/lib/firebase/          Client init, config flag, AuthProvider
-src/lib/hms/               Schemas, types, repo helpers, hooks, seed, actions
+src/lib/hms/               Schemas, types, repo helpers, hooks, seed, actions,
+                           planners (consultation, dispense, billing), metrics
 tests/rules/               Firestore rules tests (emulator)
 e2e/                       Playwright + axe-core browser tests
 ```

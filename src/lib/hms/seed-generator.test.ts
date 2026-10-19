@@ -5,6 +5,7 @@ import { SCHEMAS } from "./repo";
 import { generateSeedData, SEED_COUNTS } from "./seed-generator";
 import { DEPARTMENTS, LIMITS } from "./common";
 import { sumLinesKobo, sumPaymentsKobo } from "./invoice";
+import { allergyMentionsDrug } from "./dispense";
 
 const anchor = new Date(2026, 9, 18, 14, 30);
 const data = generateSeedData(anchor);
@@ -137,6 +138,39 @@ describe("generateSeedData", () => {
       (a) => `${a.doctorId}@${a.scheduledAt.getTime()}`,
     );
     expect(new Set(slots).size).toBe(slots.length);
+  });
+
+  it("gives every role's screen work to do on first entry", () => {
+    const today = data.appointments.filter(
+      (a) => a.scheduledAt.toDateString() === anchor.toDateString(),
+    );
+    expect(today.some((a) => a.status === "checked-in")).toBe(true);
+    expect(today.some((a) => a.status === "in-consultation")).toBe(true);
+    expect(
+      data.labOrders.filter((o) => o.status === "requested").length,
+    ).toBeGreaterThan(2);
+    expect(
+      data.labOrders.filter((o) => o.status === "collected").length,
+    ).toBeGreaterThan(1);
+    expect(
+      data.prescriptions.filter((p) => p.status === "pending").length,
+    ).toBeGreaterThan(3);
+    expect(data.invoices.some((i) => i.status === "unpaid")).toBe(true);
+    expect(data.invoices.some((i) => i.status === "part-paid")).toBe(true);
+    expect(
+      data.stockItems.filter((s) => s.quantity <= s.reorderLevel).length,
+    ).toBeGreaterThan(2);
+  });
+
+  it("includes one pending prescription the demo allergy flag catches", () => {
+    const flagged = data.prescriptions.filter((rx) => {
+      const patient = data.patients.find((p) => p.id === rx.patientId)!;
+      return (
+        rx.status === "pending" &&
+        allergyMentionsDrug(patient.allergies, rx.name)
+      );
+    });
+    expect(flagged.length).toBeGreaterThanOrEqual(1);
   });
 
   it("covers every role and department with staff", () => {

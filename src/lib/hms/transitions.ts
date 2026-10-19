@@ -33,17 +33,33 @@ export const LAB_ORDER_STATUSES = [
 ] as const;
 export type LabOrderStatus = (typeof LAB_ORDER_STATUSES)[number];
 
+/**
+ * resulted -> collected is the Admin "undo result" in the demo: it clears the
+ * result so it can be entered again. The screen offers it to Admin only; the
+ * rules cannot know the demo role, so they allow the move itself.
+ */
 export const LAB_ORDER_TRANSITIONS: Record<
   LabOrderStatus,
   readonly LabOrderStatus[]
 > = {
   requested: ["collected"],
   collected: ["resulted"],
-  resulted: [],
+  resulted: ["collected"],
+};
+
+export const LAB_ORDER_STATUS_LABELS: Record<LabOrderStatus, string> = {
+  requested: "Requested",
+  collected: "Collected",
+  resulted: "Resulted",
 };
 
 export const PRESCRIPTION_STATUSES = ["pending", "dispensed"] as const;
 export type PrescriptionStatus = (typeof PRESCRIPTION_STATUSES)[number];
+
+export const PRESCRIPTION_STATUS_LABELS: Record<PrescriptionStatus, string> = {
+  pending: "Pending",
+  dispensed: "Dispensed",
+};
 
 export const PRESCRIPTION_TRANSITIONS: Record<
   PrescriptionStatus,
@@ -55,6 +71,12 @@ export const PRESCRIPTION_TRANSITIONS: Record<
 
 export const INVOICE_STATUSES = ["unpaid", "part-paid", "paid"] as const;
 export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
+
+export const INVOICE_STATUS_LABELS: Record<InvoiceStatus, string> = {
+  unpaid: "Unpaid",
+  "part-paid": "Part-paid",
+  paid: "Paid",
+};
 
 /** Payments only move an invoice forward. */
 export const INVOICE_TRANSITIONS: Record<

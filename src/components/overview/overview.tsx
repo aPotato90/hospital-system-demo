@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useMemo } from "react";
+import { AdminDashboard } from "@/components/admin/admin-dashboard";
 import { HOSPITAL_NAME } from "@/components/brand";
 import { useCollection } from "@/lib/hms/hooks";
 import { invoiceBalanceKobo } from "@/lib/hms/invoice";
@@ -21,6 +22,7 @@ import { isLowStock } from "@/lib/hms/stock-item";
 import { ErrorState } from "@/components/app/live-state";
 import { navItemsFor } from "@/components/app/nav-config";
 import { PageHeader } from "@/components/app/page-header";
+import { DemoJourney } from "./demo-journey";
 import { Skeleton } from "@/components/ui/skeleton";
 
 function Stat({
@@ -46,7 +48,14 @@ function Stat({
   );
 }
 
+/** /app: the admin dashboard for Admin, a role overview for everyone else. */
 export function Overview() {
+  const { role } = useSandbox();
+  if (role === "admin") return <AdminDashboard journey={<DemoJourney />} />;
+  return <RoleOverview />;
+}
+
+function RoleOverview() {
   const { role } = useSandbox();
   const today = useMemo(() => startOfDay(new Date()), []);
   const patients = useCollection("patients");
@@ -78,6 +87,7 @@ export function Overview() {
         title={`Good day, ${ROLE_LABELS[role]}`}
         description={`${HOSPITAL_NAME} · ${format(new Date(), "EEEE d MMMM yyyy")}`}
       />
+      <DemoJourney />
 
       {failed?.error ? (
         <ErrorState error={failed.error} onRetry={failed.retry} />
