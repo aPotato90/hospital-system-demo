@@ -45,7 +45,20 @@ hospital management product, but it is a **demo with fake data only**.
   change both together (unit and rules tests check they agree).
 - Money is Nigerian naira stored as **integer kobo**. Format only with
   `formatNaira()` (`Intl.NumberFormat("en-NG", { style: "currency", currency: "NGN" })`).
+- Compact chart axes use `formatNairaCompact()`; everything else uses
+  `formatNaira()`.
 - Firestore Timestamps are converted to `Date` in the repo helpers.
+- Pure planners decide every multi-document write and are unit tested:
+  `consultation-plan.ts` (consultation, prescriptions, lab orders, appointment,
+  invoice), `dispense.ts`, `billing.ts`, `stock-item.ts`, `lab-query.ts`,
+  `journey.ts` and `metrics.ts` (dashboard figures; tests pin the clock and
+  use Africa/Lagos). `clinical-actions.ts` turns plans into batched writes and
+  adds the audit entries. Every create, status change, dispense, payment and
+  delete writes one audit entry.
+- Consultation fees per department live in `fees.ts` (the seed uses them too).
+- Dispensing must decrement the stock item by exactly the dispensed quantity
+  in the same batch (the rules check it with `getAfter`). Stock edits either
+  leave `quantity` alone or change only `quantity`.
 - Rules budget: Firestore stops at 1000 evaluated expressions per document.
   Worst-case invoices and consultations are close to it; keep element checks
   inline and regex-based, skip unchanged arrays, append invoice payments one at
@@ -60,6 +73,12 @@ hospital management product, but it is a **demo with fake data only**.
   overflow.
 - Light, dark and system theme with no flash on load (inline script in the root
   layout, see `src/components/theme/`).
+- Colours come from tokens in `globals.css`. Primary buttons hover to
+  `--primary-hover` (never an opacity of `--primary`, which fails AA). Charts
+  use `--chart-1` (validated with the dataviz palette checker in both themes),
+  hide the plot from assistive tech and put the numbers in a data table.
+- Screens for one role wrap their content in `<RoleGate>`; it explains which
+  role a screen is for. It is not authorisation.
 
 ## Next.js 16 notes
 
@@ -69,6 +88,11 @@ hospital management product, but it is a **demo with fake data only**.
   inside a `<Suspense>` boundary.
 - The `/app` segment is gated by client-side auth, so its layout exports
   `instant = false`.
+- Next keeps earlier routes in the DOM, hidden by `<Activity>`. Components
+  that stay mounted must reset transient state (for example "starting…"
+  flags) themselves. In Playwright, `getByText`, `getByLabel` and
+  `getByTestId` also match hidden routes, so add `.filter({ visible: true })`;
+  `getByRole` already skips hidden elements.
 
 ## Definition of done
 
