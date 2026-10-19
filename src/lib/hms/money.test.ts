@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatNaira, nairaToKobo } from "./money";
+import { formatNaira, formatNairaCompact, nairaToKobo } from "./money";
 
 describe("money", () => {
   it("formats integer kobo as naira", () => {
@@ -17,5 +17,11 @@ describe("money", () => {
   it("converts naira to whole kobo", () => {
     expect(nairaToKobo(1500)).toBe(150_000);
     expect(nairaToKobo(0.1 + 0.2)).toBe(30);
+  });
+
+  it("formats compact naira for chart axes", () => {
+    expect(formatNairaCompact(150_000_000)).toMatch(/1\.5M/);
+    expect(formatNairaCompact(5_000_000)).toMatch(/₦50K$/);
+    expect(formatNairaCompact(0)).toBe("₦0");
   });
 });

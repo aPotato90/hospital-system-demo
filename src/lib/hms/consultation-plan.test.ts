@@ -118,7 +118,7 @@ describe("buildInvoiceLines", () => {
     const labTests = Array.from({ length: 3 }, (_, i) => item(i));
     const pharmacyItems = Array.from({ length: 8 }, (_, i) => item(i + 10));
     const full =
-      1_000_000 + [...labTests, ...pharmacyItems].reduce((s, i) => s + 200, 0);
+      1_000_000 + [...labTests, ...pharmacyItems].reduce((s) => s + 200, 0);
     const lines = buildInvoiceLines({
       department: "General Practice",
       labTests,

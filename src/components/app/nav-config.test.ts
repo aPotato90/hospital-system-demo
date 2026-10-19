@@ -38,4 +38,22 @@ describe("role navigation", () => {
   it("lets admins see every screen", () => {
     expect(navItemsFor("admin")).toHaveLength(9);
   });
+
+  it("gates every clinical screen, including detail pages, to its role and Admin", () => {
+    const cases: [string, string][] = [
+      ["/app/consultations/apt-001", "doctor"],
+      ["/app/lab?status=collected", "lab"],
+      ["/app/pharmacy", "pharmacist"],
+      ["/app/billing/inv-001", "cashier"],
+    ];
+    for (const [path, role] of cases) {
+      const pathname = path.split("?")[0];
+      expect(isPathAllowed(pathname, role as never)).toBe(true);
+      expect(isPathAllowed(pathname, "admin")).toBe(true);
+      expect(isPathAllowed(pathname, "receptionist")).toBe(false);
+    }
+    expect(isPathAllowed("/app/audit-log", "admin")).toBe(true);
+    expect(isPathAllowed("/app/audit-log", "doctor")).toBe(false);
+    expect(isPathAllowed("/app/staff", "cashier")).toBe(false);
+  });
 });
